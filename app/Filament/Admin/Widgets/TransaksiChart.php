@@ -4,67 +4,97 @@ namespace App\Filament\Admin\Widgets;
 
 use App\Models\TransaksiPenyetoran;
 use Filament\Widgets\ChartWidget;
-use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 
 class TransaksiChart extends ChartWidget
 {
-    protected static ?string $heading = 'Tren Transaksi (7 Hari Terakhir)';
-
     protected static ?int $sort = 2;
+    protected static ?string $maxHeight = '240px';
+    protected int|string|array $columnSpan = ['default' => 1, 'lg' => 2];
 
-    // Menentukan tinggi chart agar proporsional
-    protected static ?string $maxHeight = '300px';
+    public ?string $filter = 'trx7';
+
+    protected function getFilters(): ?array
+    {
+        return [
+            'trx7'    => 'Jumlah transaksi · 7 hari',
+            'berat7'  => 'Berat sampah · 7 hari',
+            'trx30'   => 'Jumlah transaksi · 30 hari',
+            'berat30' => 'Berat sampah · 30 hari',
+        ];
+    }
+
+    private function mode(): string
+    {
+        return str_starts_with($this->filter ?? 'trx7', 'berat') ? 'berat' : 'trx';
+    }
+
+    private function days(): int
+    {
+        return (int) preg_replace('/\D/', '', $this->filter ?? 'trx7') ?: 7;
+    }
+
+    public function getHeading(): ?string
+    {
+        return $this->mode() === 'berat' ? 'Tren Berat Setoran' : 'Tren Transaksi Setoran';
+    }
+
+    public function getDescription(): ?string
+    {
+        return ($this->mode() === 'berat' ? 'Total berat (kg), ' : 'Jumlah transaksi, ')
+            . $this->days() . ' hari terakhir';
+    }
 
     protected function getData(): array
     {
-        $data = [];
-        $labels = [];
+        $days = $this->days();
+        $berat = $this->mode() === 'berat';
 
-        // Optimasi: Ambil data sekaligus dalam satu query untuk 7 hari terakhir
-        $transaksiPerHari = TransaksiPenyetoran::where('status', 'selesai')
-            ->where('tgl_setor', '>=', now()->subDays(6)->startOfDay())
-            ->select(
-                DB::raw('DATE(tgl_setor) as date'),
-                DB::raw('count(*) as aggregate')
-            )
-            ->groupBy('date')
-            ->pluck('aggregate', 'date');
+        $perHari = TransaksiPenyetoran::query()
+            ->selectRaw('DATE(created_at) as tgl, COUNT(*) as jml, SUM(total_berat) as berat')
+            ->where('created_at', '>=', now()->subDays($days - 1)->startOfDay())
+            ->when($berat, fn ($q) => $q->where('status', 'selesai'))
+            ->groupBy('tgl')
+            ->get()
+            ->keyBy('tgl');
 
-        // Mapping data ke label 7 hari terakhir
-        for ($i = 6; $i >= 0; $i--) {
-            $date = now()->subDays($i)->format('Y-m-d');
-            $labels[] = Carbon::parse($date)->translatedFormat('d M');
-            
-            // Jika hari tersebut tidak ada transaksi, beri nilai 0
-            $data[] = $transaksiPerHari->get($date, 0);
+        $hari = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+        $labels = $data = $colors = [];
+
+        for ($i = $days - 1; $i >= 0; $i--) {
+            $d = now()->subDays($i);
+            $row = $perHari->get($d->toDateString());
+
+            $labels[] = $days <= 7 ? $hari[$d->dayOfWeekIso - 1] : $d->format('d/m');
+            $data[]   = $berat ? round((float) ($row->berat ?? 0), 1) : (int) ($row->jml ?? 0);
+            $colors[] = $i === 0 ? '#1a7f4b' : '#e0f0e4'; // hari ini disorot
         }
 
         return [
-            'datasets' => [
-                [
-                    'label' => 'Transaksi Selesai',
-                    'data' => $data,
-                    'fill' => 'start',
-                    'tension' => 0.4, // Membuat garis sedikit melengkung (smooth line)
-                    'backgroundColor' => 'rgba(34, 197, 94, 0.1)',
-                    'borderColor' => '#22c55e',
-                    'borderWidth' => 3,
-                    'pointBackgroundColor' => '#22c55e',
-                ],
-            ],
+            'datasets' => [[
+                'label' => $berat ? 'Berat (kg)' : 'Transaksi',
+                'data' => $data,
+                'backgroundColor' => $colors,
+                'borderRadius' => 8,
+                'borderSkipped' => false,
+                'barPercentage' => 0.6,
+            ]],
             'labels' => $labels,
         ];
     }
 
     protected function getType(): string
     {
-        return 'line';
+        return 'bar';
     }
 
-    // Matikan auto-refresh untuk performa
-    protected function getPollingInterval(): ?string
+    protected function getOptions(): array
     {
-        return null;
+        return [
+            'plugins' => ['legend' => ['display' => false]],
+            'scales' => [
+                'y' => ['display' => false, 'grid' => ['display' => false]],
+                'x' => ['grid' => ['display' => false], 'border' => ['display' => false]],
+            ],
+        ];
     }
 }

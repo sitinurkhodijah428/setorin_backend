@@ -2,75 +2,67 @@
 
 namespace App\Filament\Admin\Widgets;
 
-use App\Models\{User, BankSampah, TransaksiPenyetoran, PenarikanSaldo};
-use Filament\Widgets\StatsOverviewWidget as BaseWidget;
-use Filament\Widgets\StatsOverviewWidget\Stat;
+use App\Filament\Admin\Resources\PenarikanSaldoResource;
+use App\Models\BankSampah;
+use App\Models\PenarikanSaldo;
+use App\Models\TransaksiPenyetoran;
+use App\Models\User;
+use App\Support\Format;
+use Filament\Widgets\Widget;
 
-class StatsOverview extends BaseWidget
+class StatsOverview extends Widget
 {
+    protected static string $view = 'filament.admin.widgets.stats-overview';
     protected static ?int $sort = 1;
+    protected int|string|array $columnSpan = 'full';
 
-    // Matikan auto-refresh untuk performa
-    protected function getPollingInterval(): ?string
+    protected function getViewData(): array
     {
-        return null;
-    }
+        $bulanIni  = [now()->startOfMonth(), now()];
+        $lastStart = now()->subMonthNoOverflow()->startOfMonth();
+        $bulanLalu = [$lastStart, $lastStart->copy()->endOfMonth()];
 
-    protected function getStats(): array
-    {
-        // Hitung total berat sampah dari transaksi yang sudah selesai
-        $totalBerat = TransaksiPenyetoran::where('status', 'selesai')->sum('total_berat_kg');
-        
-        // Hitung jumlah penarikan yang menunggu persetujuan
-        $pendingPenarikan = PenarikanSaldo::where('status', 'pending')->count();
+        $trx = fn (array $r) => TransaksiPenyetoran::whereBetween('created_at', $r);
+        $selesai = fn (array $r) => $trx($r)->where('status', 'selesai');
+        $nasabahBaru = fn (array $r) => User::role('nasabah')->whereBetween('created_at', $r);
 
-        return [
-            // Statistik Nasabah
-            Stat::make('Total Nasabah', User::where('role', 'nasabah')->count())
-                ->description('Pengguna terdaftar')
-                ->descriptionIcon('heroicon-m-user-group')
-                ->color('success')
-                ->chart([7, 2, 10, 3, 15, 4, 17]), // Contoh chart mini
+        $pending = PenarikanSaldo::where('status', 'pending')->count();
 
-            // Statistik Bank Sampah
-            Stat::make('Total Bank Sampah', BankSampah::where('status', 'aktif')->count())
-                ->description('Unit bank aktif')
-                ->descriptionIcon('heroicon-m-building-office-2')
-                ->color('info'),
-
-            // Statistik Transaksi Bulanan
-            Stat::make('Transaksi Bulan Ini', 
-                TransaksiPenyetoran::whereMonth('tgl_setor', now()->month)
-                    ->whereYear('tgl_setor', now()->year)
-                    ->where('status', 'selesai')
-                    ->count()
-            )
-                ->description('Setoran berhasil')
-                ->descriptionIcon('heroicon-m-arrow-trending-up')
-                ->color('primary'),
-
-            // Statistik Berat Sampah
-            Stat::make('Total Sampah Terkumpul', number_format($totalBerat, 1, ',', '.') . ' kg')
-                ->description('Akumulasi berat global')
-                ->descriptionIcon('heroicon-m-scale')
-                ->color('warning'),
-
-            // Statistik Penarikan Saldo
-            Stat::make('Penarikan Pending', $pendingPenarikan)
-                ->description($pendingPenarikan > 0 ? 'Perlu tindakan segera' : 'Semua diproses')
-                ->descriptionIcon('heroicon-m-banknotes')
-                ->color($pendingPenarikan > 0 ? 'danger' : 'success')
-                ->extraAttributes([
-                    'class' => 'cursor-pointer',
-                    // Jika diklik akan langsung menuju halaman penarikan
-                    'onclick' => "window.location.href='/admin/penarikan-saldo'",
-                ]),
-
-            // Statistik Petugas
-            Stat::make('Total Petugas', User::where('role', 'petugas')->count())
-                ->description('Petugas lapangan')
-                ->descriptionIcon('heroicon-m-identification')
-                ->color('gray'),
-        ];
+        return ['stats' => [
+            [
+                'icon' => 'heroicon-o-users', 'tone' => 'green',
+                'value' => number_format(User::role('nasabah')->where('status', 'aktif')->count(), 0, ',', '.'),
+                'label' => 'Total Nasabah',
+                'trend' => Format::trend($nasabahBaru($bulanIni)->count(), $nasabahBaru($bulanLalu)->count()),
+            ],
+            [
+                'icon' => 'heroicon-o-building-storefront', 'tone' => 'blue',
+                'value' => number_format(BankSampah::where('status', 'aktif')->count(), 0, ',', '.'),
+                'label' => 'Bank Sampah Aktif',
+                'trend' => null,
+            ],
+            [
+                'icon' => 'heroicon-o-banknotes', 'tone' => 'lime',
+                'value' => number_format($trx($bulanIni)->count(), 0, ',', '.'),
+                'label' => 'Transaksi Bulan Ini',
+                'trend' => Format::trend($trx($bulanIni)->count(), $trx($bulanLalu)->count()),
+            ],
+            [
+                'icon' => 'heroicon-o-arrow-path', 'tone' => 'green',
+                'value' => Format::berat((float) TransaksiPenyetoran::where('status', 'selesai')->sum('total_berat')),
+                'label' => 'Sampah Terkumpul',
+                'trend' => Format::trend(
+                    (float) $selesai($bulanIni)->sum('total_berat'),
+                    (float) $selesai($bulanLalu)->sum('total_berat'),
+                ),
+            ],
+            [
+                'icon' => 'heroicon-o-clock', 'tone' => 'amber',
+                'value' => number_format($pending, 0, ',', '.'),
+                'label' => 'Penarikan Pending',
+                'trend' => null,
+                'url' => PenarikanSaldoResource::getUrl(),
+            ],
+        ]];
     }
 }
