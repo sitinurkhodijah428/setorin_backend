@@ -30,22 +30,41 @@ class TransaksiTerbaru extends TableWidget
                 Tables\Actions\Action::make('semua')
                     ->label('Lihat semua →')
                     ->link()
+                    ->color('primary')
                     ->url(fn () => TransaksiPenyetoranResource::getUrl()),
             ])
             ->columns([
-                Tables\Columns\TextColumn::make('id')->label('ID TRANSAKSI')
-                    ->formatStateUsing(fn ($record) => sprintf('TRX-%s-%04d', $record->created_at->format('Y'), $record->id)),
-                Tables\Columns\TextColumn::make('nasabah.pengguna.nama')->label('NASABAH'),
-                Tables\Columns\TextColumn::make('kategori')->label('KATEGORI')
-                    ->state(fn ($record) => $record->detail->first()?->hargaSampah?->jenis_sampah ?? '-'),
-                Tables\Columns\TextColumn::make('total_berat')->label('BERAT')
-                    ->formatStateUsing(fn ($state) => rtrim(rtrim(number_format($state, 1, ',', '.'), '0'), ',') . ' kg'),
-                Tables\Columns\TextColumn::make('total_harga')->label('NILAI TUKAR')
-                    ->formatStateUsing(fn ($state) => 'Rp ' . number_format($state, 0, ',', '.')),
-                Tables\Columns\TextColumn::make('status')->label('STATUS')
-                    ->formatStateUsing(fn ($state) => ucfirst($state))
-                    ->color(fn ($state) => $state === 'selesai' ? 'success' : 'warning')
+                Tables\Columns\TextColumn::make('id')
+                    ->label('ID TRANSAKSI')
+                    ->formatStateUsing(fn ($record) => sprintf('TRX-%s-%04d', $record->created_at->format('Y'), $record->id))
+                    ->color('gray'),
+
+                Tables\Columns\TextColumn::make('nasabah.pengguna.nama')
+                    ->label('NASABAH')
                     ->weight('medium'),
+
+                Tables\Columns\TextColumn::make('kategori')
+                    ->label('KATEGORI')
+                    ->state(fn ($record) => $record->detail->first()?->hargaSampah?->jenis_sampah ?? '-'),
+
+                Tables\Columns\TextColumn::make('total_berat_kg')
+                    ->label('BERAT')
+                    ->formatStateUsing(fn ($state) => number_format((float) $state, 1, ',', '.') . ' kg'),
+
+                Tables\Columns\TextColumn::make('nilai_tukar')
+                    ->label('NILAI TUKAR')
+                    ->state(fn ($record) => 'Rp ' . number_format((float) $record->detail->sum('subtotal'), 0, ',', '.')),
+
+                Tables\Columns\TextColumn::make('status')
+                    ->label('STATUS')
+                    ->formatStateUsing(fn ($state) => ucfirst($state))
+                    ->color(fn (string $state): string => match ($state) {
+                        'selesai' => 'success',
+                        'diproses' => 'warning',
+                        'dibatalkan' => 'danger',
+                        default => 'gray',
+                    })
+                    ->weight('semibold'),
             ]);
     }
 }

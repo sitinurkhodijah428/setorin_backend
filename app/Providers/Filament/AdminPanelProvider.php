@@ -67,7 +67,7 @@ class AdminPanelProvider extends PanelProvider
                     300,
                     fn () => (float) TransaksiPenyetoran::whereMonth('created_at', now()->month)
                         ->whereYear('created_at', now()->year)
-                        ->sum('total_berat') * 0.5
+                        ->sum('total_berat_kg') * 0.5
                 );
 
                 $co2 = $kg >= 1000
